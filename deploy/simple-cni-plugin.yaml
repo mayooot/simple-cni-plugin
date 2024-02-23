@@ -1,0 +1,153 @@
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: simple-cni-plugin
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - list
+      - get
+      - watch
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: simple-cni-plugin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: simple-cni-plugin
+subjects:
+  - kind: ServiceAccount
+    name: simple-cni-plugin
+    namespace: kube-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: simple-cni-plugin
+  namespace: kube-system
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: kube-simple-cni-plugin-cfg
+  namespace: kube-system
+  labels:
+    tier: node
+    app: flannel
+data:
+  cni-conf.json: |
+    {
+      "name": "simple-cni-plugin",
+      "cniVersion": "0.4.0",
+      "type": "simple-cni-plugin",
+      "dataDir": "/var/lib/cni/networks"
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-simple-cni-plugin-ds
+  namespace: kube-system
+  labels:
+    tier: node
+    app: simple-cni-plugin
+spec:
+  selector:
+    matchLabels:
+      app: simple-cni-plugin
+  template:
+    metadata:
+      labels:
+        tier: node
+        app: simple-cni-plugin
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+      hostNetwork: true
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+      serviceAccountName: simple-cni-plugin
+      initContainers:
+        - name: install-cni-plugin
+          image: registry.cn-hangzhou.aliyuncs.com/mayooot/simple-cni-plugin:v0.2
+          command:
+            - cp
+          args:
+            - -f
+            - /simple-cni-plugin
+            - /opt/cni/bin/simple-cni-plugin
+          volumeMounts:
+            - name: cni-plugin
+              mountPath: /opt/cni/bin
+        - name: install-cni
+          image: registry.cn-hangzhou.aliyuncs.com/mayooot/simple-cni-plugin:v0.2
+          command:
+            - cp
+          args:
+            - -f
+            - /etc/kube-simple-cni-plugin/cni-conf.json
+            - /etc/cni/net.d/10-simple-cni-plugin.conf
+          volumeMounts:
+            - name: cni
+              mountPath: /etc/cni/net.d
+            - name: simple-cni-plugin-cfg
+              mountPath: /etc/kube-simple-cni-plugin/
+      containers:
+        - name: kube-simple-cni-plugin
+          image: registry.cn-hangzhou.aliyuncs.com/mayooot/simple-cni-plugin:v0.3
+          command:
+            - /simple-cni-plugin-daemonset
+          args:
+            # get cluster cidr from kube-controller-manager
+            - --cluster-cidr=10.244.0.0/16
+            - --node=$(NODE_NAME)
+            - --enable-iptables
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "50Mi"
+            limits:
+              cpu: "100m"
+              memory: "50Mi"
+          securityContext:
+            privileged: false
+            capabilities:
+              add: ["NET_ADMIN", "NET_RAW"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: run
+              mountPath: /run/simple-cni-plugin
+            - name: simple-cni-plugin-cfg
+              mountPath: /etc/kube-simple-cni-plugin/
+      volumes:
+        - name: run
+          hostPath:
+            path: /run/simple-cni-plugin
+        - name: cni-plugin
+          hostPath:
+            path: /opt/cni/bin
+        - name: cni
+          hostPath:
+            path: /etc/cni/net.d
+        - name: simple-cni-plugin-cfg
+          configMap:
+            name: kube-simple-cni-plugin-cfg
