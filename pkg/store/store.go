@@ -33,25 +33,27 @@ type Store struct {
 	dataFile string
 }
 
-func NewStore(dataDir string, network string) (*Store, error) {
+func NewStore(dataDir string, name string) (*Store, error) {
 	if dataDir == "" {
 		dataDir = defaultDataDir
 	}
-	dir := filepath.Join(dataDir, network)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, err
+	dir := filepath.Join(dataDir, name)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, err
+		}
 	}
 
 	lock, err := newFileLock(dir)
 	if err != nil {
 		return nil, err
 	}
-	dataFile := filepath.Join(dir, network+".json")
+	dataFile := filepath.Join(dir, name+".json")
 	data := &data{IPs: make(map[IP]containerNetInfo)}
 
 	return &Store{
 		FileMutex: lock,
-		dir:       dataDir,
+		dir:       dir,
 		data:      data,
 		dataFile:  dataFile,
 	}, nil
