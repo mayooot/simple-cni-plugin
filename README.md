@@ -1,6 +1,6 @@
 # simple-cni-plugin
 
-It is a simple way to configure a layer 3 network fabric designed for K8s, like Flannel host-gw.
+simple-cni-plugin is a simple CNI plugin basde on linux brige and routes for Kubernetes.
 
 # Architecture
 
